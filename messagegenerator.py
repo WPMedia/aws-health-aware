@@ -87,7 +87,7 @@ def get_message_for_slack(event_details, event_type, affected_accounts, affected
                 f"the {event_details['successfulSet'][0]['event']['region'].upper()} region.*"
             )
             message = {
-                "text": summary,
+               "text": summary,
                 "accounts": affected_accounts,
                 "resources": affected_entities,
                 "service": event_details['successfulSet'][0]['event']['service'],
