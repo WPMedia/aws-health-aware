@@ -17,6 +17,7 @@ from messagegenerator import get_message_for_slack, get_org_message_for_slack, g
     get_org_message_for_chime, \
     get_message_for_teams, get_org_message_for_teams, get_message_for_email, get_org_message_for_email, \
     get_detail_for_eventbridge
+from plugin_jira import Jira, get_org_message_for_jira
 
 # query active health API endpoint
 health_dns = socket.gethostbyname_ex('global.health.amazonaws.com')
@@ -36,7 +37,7 @@ config = Config(
 )
 
 # TODO decide if account_name should be blank on error
-# Get Account Name 
+# Get Account Name
 def get_account_name(account_id):
     org_client = get_sts_token('organizations')
     try:
@@ -82,7 +83,7 @@ def send_alert(event_details, affected_accounts, affected_entities, event_type):
             print("Got an error while sending message to Slack: ", e.code, e.reason)
         except URLError as e:
             print("Server connection failed: ", e.reason)
-            pass            
+            pass
     if "office.com/webhook" in teams_url:
         try:
             print("Sending the alert to Teams")
@@ -116,13 +117,14 @@ def send_org_alert(event_details, affected_org_accounts, affected_org_entities, 
     slack_url = get_secrets()["slack"]
     teams_url = get_secrets()["teams"]
     chime_url = get_secrets()["chime"]
+    jira_config = get_secrets()["jira"]
     SENDER = os.environ['FROM_EMAIL']
     RECIPIENT = os.environ['TO_EMAIL']
     event_bus_name = get_secrets()["eventbusname"]
-
+    print("Top:: Org alert send")
     #get the list of resources from the array of affected entities
     resources = get_resources_from_entities(affected_org_entities)
-    
+
     if "None" not in event_bus_name:
         try:
             print("Sending the org alert to Event Bridge")
@@ -155,7 +157,7 @@ def send_org_alert(event_details, affected_org_accounts, affected_org_entities, 
             print("Got an error while sending message to Slack: ", e.code, e.reason)
         except URLError as e:
             print("Server connection failed: ", e.reason)
-            pass            
+            pass
     if "office.com/webhook" in teams_url:
         try:
             print("Sending the alert to Teams")
@@ -185,6 +187,25 @@ def send_org_alert(event_details, affected_org_accounts, affected_org_entities, 
                 chime_url)
         except HTTPError as e:
             print("Got an error while sending message to Chime: ", e.code, e.reason)
+        except URLError as e:
+            print("Server connection failed: ", e.reason)
+            pass
+
+    if "JiraInstanceURL" in jira_config:
+        jira_auth = {
+            "base_url": jira_config["JiraInstanceURL"],
+            "username": jira_config["Username"],
+            "token": jira_config["Secret"],
+        }
+        issue_config = jira_config["IssueConfig"]
+        try:
+
+            send_to_jira(
+                get_org_message_for_jira(event_details, event_type, affected_org_accounts, resources, issue_config),
+                jira_auth,
+            )
+        except HTTPError as e:
+            print("Got an error while sending message to Jira: ", e.code, e.reason)
         except URLError as e:
             print("Server connection failed: ", e.reason)
             pass
@@ -227,6 +248,12 @@ def send_to_teams(message, webhookurl):
         print("Request failed : ", e.code, e.reason)
     except URLError as e:
         print("Server connection failed: ", e.reason, e.reason)
+
+def send_to_jira(issues, jira_auth):
+    print("Sending the alert to Jira")
+    client = Jira(auth=jira_auth)
+    responses = client.manage_issues(issues)
+    print("Done Jira")
 
 
 def send_email(event_details, eventType, affected_accounts, affected_entities):
@@ -316,10 +343,10 @@ def get_health_org_accounts(health_client, event, event_arn):
     return affected_org_accounts
 
 # get the array of affected entities for all affected accounts and return as an array of JSON objects
-def get_affected_entities(health_client, event_arn, affected_accounts, is_org_mode):  
+def get_affected_entities(health_client, event_arn, affected_accounts, is_org_mode):
     affected_entity_array = []
 
-    for account in affected_accounts: 
+    for account in affected_accounts:
 
         if is_org_mode:
             event_entities_paginator = health_client.get_paginator('describe_affected_entities_for_organization')
@@ -344,23 +371,23 @@ def get_affected_entities(health_client, event_arn, affected_accounts, is_org_mo
         for event_entities_page in event_entities_page_iterator:
             json_event_entities = json.dumps(event_entities_page, default=myconverter)
             parsed_event_entities = json.loads(json_event_entities)
-            for entity in parsed_event_entities['entities']:                  
+            for entity in parsed_event_entities['entities']:
                 entity.pop("entityArn") #remove entityArn to avoid confusion with the arn of the entityValue (not present)
                 entity.pop("eventArn") #remove eventArn duplicate of detail.arn
                 entity.pop("lastUpdatedTime") #remove for brevity
                 if is_org_mode:
                     entity['awsAccountName'] = get_account_name(entity['awsAccountId'])
                 affected_entity_array.append(entity)
-    
+
     return affected_entity_array
 
 #COMMON
 #get the entityValues from the array and return as an array (of strings) for use with chat channels
 #don't list entities which are accounts (handled separately for chat applications)
 def get_resources_from_entities(affected_entity_array):
-    
+
     resources = []
-    
+
     for entity in affected_entity_array:
         if entity['entityValue'] == "UNKNOWN":
             #UNKNOWN indicates a public/non-accountspecific event, no resources
@@ -414,7 +441,7 @@ def update_org_ddb(event_arn, str_update, status_code, event_details, affected_o
                 }
             )
             affected_org_accounts_details = [
-                    f"{get_account_name(account_id)} ({account_id})" for account_id in affected_org_accounts]            
+                    f"{get_account_name(account_id)} ({account_id})" for account_id in affected_org_accounts]
             # send to configured endpoints
             if status_code != "closed":
                 send_org_alert(event_details, affected_org_accounts_details, affected_org_entities, event_type="create")
@@ -441,7 +468,7 @@ def update_org_ddb(event_arn, str_update, status_code, event_details, affected_o
                     }
                 )
                 affected_org_accounts_details = [
-                    f"{get_account_name(account_id)} ({account_id})" for account_id in affected_org_accounts]                
+                    f"{get_account_name(account_id)} ({account_id})" for account_id in affected_org_accounts]
                 # send to configured endpoints
                 if status_code != "closed":
                     send_org_alert(event_details, affected_org_accounts_details, affected_org_entities, event_type="create")
@@ -536,14 +563,16 @@ def get_secrets():
     secret_teams_name = "MicrosoftChannelID"
     secret_slack_name = "SlackChannelID"
     secret_chime_name = "ChimeChannelID"
+    secret_jira_name = "JiraInstanceURL"
     region_name = os.environ['AWS_REGION']
     get_secret_value_response_assumerole = ""
     get_secret_value_response_eventbus = ""
     get_secret_value_response_chime = ""
     get_secret_value_response_teams = ""
     get_secret_value_response_slack = ""
+    get_secret_value_response_jira = ""
     event_bus_name = "EventBusName"
-    secret_assumerole_name = "AssumeRoleArn" 
+    secret_assumerole_name = "AssumeRoleArn"
 
     # create a Secrets Manager client
     session = boto3.session.Session()
@@ -560,7 +589,7 @@ def get_secrets():
         if e.response['Error']['Code'] == 'AccessDeniedException':
             print("No AWS Secret configured for Teams, skipping")
             teams_channel_id = "None"
-        else: 
+        else:
             print("There was an error with the Teams secret: ",e.response)
             teams_channel_id = "None"
     finally:
@@ -576,7 +605,7 @@ def get_secrets():
         if e.response['Error']['Code'] == 'AccessDeniedException':
             print("No AWS Secret configured for Slack, skipping")
             slack_channel_id = "None"
-        else:    
+        else:
             print("There was an error with the Slack secret: ",e.response)
             slack_channel_id = "None"
     finally:
@@ -592,7 +621,7 @@ def get_secrets():
         if e.response['Error']['Code'] == 'AccessDeniedException':
             print("No AWS Secret configured for Chime, skipping")
             chime_channel_id = "None"
-        else:    
+        else:
             print("There was an error with the Chime secret: ",e.response)
             chime_channel_id = "None"
     finally:
@@ -608,14 +637,32 @@ def get_secrets():
         if e.response['Error']['Code'] == 'AccessDeniedException':
             print("No AWS Secret configured for Assume Role, skipping")
             assumerole_channel_id = "None"
-        else:    
+        else:
             print("There was an error with the Assume Role secret: ",e.response)
             assumerole_channel_id = "None"
     finally:
         if 'SecretString' in get_secret_value_response_assumerole:
             assumerole_channel_id = get_secret_value_response_assumerole['SecretString']
         else:
-            assumerole_channel_id = "None"    
+            assumerole_channel_id = "None"
+    # JIRA
+    try:
+        get_secret_value_response_jira = client.get_secret_value(
+            SecretId=secret_jira_name
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'AccessDeniedException':
+            print("No AWS Secret configured for Jira, skipping", e)
+            jira_config = "None"
+        else:
+            print("There was an error with the Jira secret: ",e.response)
+            jira_config = "None"
+    finally:
+        if 'SecretString' in get_secret_value_response_jira:
+            jira_config = json.loads(get_secret_value_response_jira["SecretString"])
+        else:
+            jira_config = "None"
+
     try:
         get_secret_value_response_eventbus = client.get_secret_value(
             SecretId=event_bus_name
@@ -624,23 +671,24 @@ def get_secrets():
         if e.response['Error']['Code'] == 'AccessDeniedException':
             print("No AWS Secret configured for EventBridge, skipping")
             eventbus_channel_id = "None"
-        else:    
+        else:
             print("There was an error with the EventBridge secret: ",e.response)
             eventbus_channel_id = "None"
     finally:
         if 'SecretString' in get_secret_value_response_eventbus:
             eventbus_channel_id = get_secret_value_response_eventbus['SecretString']
         else:
-            eventbus_channel_id = "None"            
+            eventbus_channel_id = "None"
         secrets = {
             "teams": teams_channel_id,
             "slack": slack_channel_id,
             "chime": chime_channel_id,
             "eventbusname": eventbus_channel_id,
-            "ahaassumerole": assumerole_channel_id
-        }    
+            "ahaassumerole": assumerole_channel_id,
+            "jira": jira_config,
+        }
         # uncomment below to verify secrets values
-        #print("Secrets: ",secrets)   
+        #print("Secrets: ",secrets)
     return secrets
 
 
@@ -659,7 +707,7 @@ def describe_events(health_client):
             {
                 'from': time_delta
             }
-        ]    
+        ]
     }
 
     if health_event_type == "issue":
@@ -710,8 +758,8 @@ def describe_events(health_client):
 def describe_org_events(health_client):
     str_ddb_format_sec = '%s'
     # set hours to search back in time for events
-    delta_hours = os.environ['EVENT_SEARCH_BACK']
-    health_event_type = os.environ['HEALTH_EVENT_TYPE']
+    delta_hours = os.environ.get('EVENT_SEARCH_BACK', "1")
+    health_event_type = os.environ.get('HEALTH_EVENT_TYPE', )
     dict_regions = os.environ['REGIONS']
     delta_hours = int(delta_hours)
     time_delta = (datetime.now() - timedelta(hours=delta_hours))
@@ -747,7 +795,7 @@ def describe_org_events(health_client):
                 status_code = event['statusCode']
                 str_update = parser.parse((event['lastUpdatedTime']))
                 str_update = str_update.strftime(str_ddb_format_sec)
-                
+
                 # get organizational view requirements
                 affected_org_accounts = get_health_org_accounts(health_client, event, event_arn)
                 if os.environ['ACCOUNT_IDS'] == "None" or os.environ['ACCOUNT_IDS'] == "":
@@ -823,12 +871,12 @@ def send_to_eventbridge(message, event_type, resources, event_bus):
     client = boto3.client('events')
 
     entries = eventbridge_generate_entries(message, resources, event_bus)
-        
+
     print("Sending entries: ", entries)
 
     response = client.put_events(Entries=entries)
     print("Response from eventbridge is:", response)
-    
+
 def getAccountIDs():
     account_ids  = ""
     key_file_name = os.environ['ACCOUNT_IDS']
@@ -845,27 +893,27 @@ def getAccountIDs():
 def get_sts_token(service):
     assumeRoleArn = get_secrets()["ahaassumerole"]
     boto3_client = None
-    
+
     if "arn:aws:iam::" in assumeRoleArn:
         ACCESS_KEY = []
         SECRET_KEY = []
         SESSION_TOKEN = []
-        
+
         sts_connection = boto3.client('sts')
-        
+
         ct = datetime.now()
         role_session_name = "cross_acct_aha_session"
-        
+
         acct_b = sts_connection.assume_role(
           RoleArn=assumeRoleArn,
           RoleSessionName=role_session_name,
           DurationSeconds=900,
         )
-        
+
         ACCESS_KEY    = acct_b['Credentials']['AccessKeyId']
         SECRET_KEY    = acct_b['Credentials']['SecretAccessKey']
         SESSION_TOKEN = acct_b['Credentials']['SessionToken']
-        
+
         # create service client using the assumed role credentials, e.g. S3
         boto3_client = boto3.client(
           service,
@@ -878,7 +926,7 @@ def get_sts_token(service):
     else:
         boto3_client = boto3.client(service, config=config)
         print("Running in management account deployment mode")
-    
+
     return boto3_client
 
 def main(event, context):
