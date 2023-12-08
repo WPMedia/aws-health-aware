@@ -176,9 +176,20 @@ class Jira(object):
 
     statuses = []
     for issue in issues:
+      create_issue_resp = self.create_issue(issue)
+      print("body", create_issue_resp.status, create_issue_resp.data)
       if issue.status == "resolve":
-        statuses.append(self.resolve_issue(issue))
-      statuses.append(self.create_issue(issue))
+        resolve_issue_resp = self.resolve_issue(issue)
+        print("body", resolve_issue_resp.status, resolve_issue_resp.data)
+
+        statuses.append(resolve_issue_resp)
+      else:
+        statuses.append(create_issue_resp)
+
+      # Don't create all issues
+      # if issue.status == "resolve":
+      #   statuses.append(self.resolve_issue(issue))
+      # statuses.append(self.create_issue(issue))
 
     return statuses
 
@@ -187,7 +198,7 @@ class Jira(object):
     if issue_exists:
       print(f"Issue already created as {issue_exists}")
       return
-
+    print(issue.as_json())
     return(http.request(
       'POST',
       f"{self.auth.base_url}/issue",
@@ -245,7 +256,7 @@ class Jira(object):
     return resp
 
 
-def get_org_message_for_jira(event_details, event_type, affected_org_accounts, resources, jira_config):
+def get_org_message_for_jira(event_details, event_type, affected_org_accounts, resources, issue_config):
   """
   issue_config should look like the following (values are your own):
   {
@@ -260,11 +271,15 @@ def get_org_message_for_jira(event_details, event_type, affected_org_accounts, r
   """
   issues = []
   for aws_account in affected_org_accounts:
+    if "mappings" not in issue_config:
+      project = issue_config["default_project"]
+    else:
+      project = issue_config["mappings"].get(aws_account, issue_config["default_project"])
     issues.append(JiraAHAObject(
-      priority=jira_config["priority"],
-      issue_type=jira_config["issue_type"],
-      project=jira_config["mappings"].get(aws_account, jira_config["default_project"]),
-      resolution_status=jira_config["resolution_status"],
+      priority=issue_config["priority"],
+      issue_type=issue_config["issue_type"],
+      project=project,
+      resolution_status=issue_config["resolution_status"],
       issue_raw=event_details,
       status=event_type,
     ))

@@ -197,7 +197,7 @@ def send_org_alert(event_details, affected_org_accounts, affected_org_entities, 
             "username": jira_config["Username"],
             "token": jira_config["Secret"],
         }
-        issue_config = jira_config["IssueConfig"]
+        issue_config = json.loads(jira_config["IssueConfig"])
         try:
 
             send_to_jira(
@@ -253,7 +253,7 @@ def send_to_jira(issues, jira_auth):
     print("Sending the alert to Jira")
     client = Jira(auth=jira_auth)
     responses = client.manage_issues(issues)
-    print("Done Jira")
+    print(responses, "Done Jira")
 
 
 def send_email(event_details, eventType, affected_accounts, affected_entities):
@@ -434,6 +434,8 @@ def update_org_ddb(event_arn, str_update, status_code, event_details, affected_o
                     'lastUpdatedTime': str_update,
                     'added': sec_now,
                     'ttl': int(sec_now) + delta_hours_sec + 86400,
+                    # 'ttl': int(sec_now) + 60,
+
                     'statusCode': status_code,
                     'affectedAccountIDs': affected_org_accounts,
                     'latestDescription': event_latestDescription
@@ -460,7 +462,9 @@ def update_org_ddb(event_arn, str_update, status_code, event_details, affected_o
                         'arn': event_arn,
                         'lastUpdatedTime': str_update,
                         'added': sec_now,
-                        'ttl': int(sec_now) + delta_hours_sec + 86400,
+                        # 'ttl': int(sec_now) + delta_hours_sec + 86400,
+                        'ttl': int(sec_now) + 60,
+
                         'statusCode': status_code,
                         'affectedAccountIDs': affected_org_accounts,
                         'latestDescription': event_latestDescription
@@ -515,7 +519,8 @@ def update_ddb(event_arn, str_update, status_code, event_details, affected_accou
                     'arn': event_arn,
                     'lastUpdatedTime': str_update,
                     'added': sec_now,
-                    'ttl': int(sec_now) + delta_hours_sec + 86400,
+                    # 'ttl': int(sec_now) + delta_hours_sec + 86400,
+                    'ttl': int(sec_now)+ 60,
                     'statusCode': status_code,
                     'affectedAccountIDs': affected_accounts,
                     'latestDescription': event_latestDescription
@@ -929,12 +934,63 @@ def get_sts_token(service):
 
     return boto3_client
 
+def manage_expiry_events(events, health_client):
+    """
+    Capture expiry/remove events and double check that they should be removed
+    """
+    str_ddb_format_sec = '%s'
+    print("Running expiry events handler")
+    for event in events:
+
+        event_arn = event["dynamodb"]["OldImage"]["arn"]["S"]
+        affected_org_accounts = [i["S"] for i in event["dynamodb"]["OldImage"]["affectedAccountIDs"]["L"]]
+        event_details = json.dumps(describe_org_event_details(health_client, event_arn, affected_org_accounts),
+                                default=myconverter)
+        event_details = json.loads(event_details)
+        print("Event Details: ", event_details)
+        affected_org_entities = get_affected_entities(health_client, event_arn, affected_org_accounts, is_org_mode = True)
+
+        if event_details['successfulSet'] == []:
+            print("An error occured with account:", event_details['failedSet'][0]['awsAccountId'], "due to:",
+                event_details['failedSet'][0]['errorName'], ":",
+                event_details['failedSet'][0]['errorMessage'])
+            continue
+        else:
+            for item in event_details["successfulSet"]:
+                # write to dynamoDB for persistence
+                status_code = item["event"]['statusCode']
+                str_update = parser.parse((item["event"]['lastUpdatedTime']))
+                str_update = str_update.strftime(str_ddb_format_sec)
+                update_org_ddb(event_arn, str_update, status_code, event_details, affected_org_accounts,
+                            affected_org_entities)
+
+
+def get_expiry_events(event):
+    """
+    Look for expiry/remove events so we can double check
+    """
+    expiry_events = []
+    if "Records" in event:
+        for record in event["Records"]:
+            if record.get("eventName") and record.get("userIdentity"):
+                if record["eventName"] == "REMOVE" and \
+                record["userIdentity"]["principalId"] == "dynamodb.amazonaws.com" and \
+                record["userIdentity"]["type"] == "Service" and \
+                record["dynamodb"]["OldImage"]["statusCode"]["S"] != "closed":
+                    expiry_events.append(record)
+    return expiry_events
+
 def main(event, context):
     print("THANK YOU FOR CHOOSING AWS HEALTH AWARE!")
     health_client = get_sts_token('health')
     org_status = os.environ['ORG_STATUS']
     #str_ddb_format_sec = '%s'
+    expiry_events = get_expiry_events(event)
 
+    print("Incoming events", event, expiry_events)
+
+    if expiry_events:
+        return manage_expiry_events(expiry_events, health_client)
     # check for AWS Organizations Status
     if org_status == "No":
         #TODO update text below to reflect current functionality
@@ -946,4 +1002,5 @@ def main(event, context):
         describe_org_events(health_client)
 
 if __name__ == "__main__":
-    main('', '')
+    event = {'Records': [{'eventID': '4ddc6d0b19fd21c913a84c6949c9b8b3', 'eventName': 'REMOVE', 'eventVersion': '1.1', 'eventSource': 'aws:dynamodb', 'awsRegion': 'us-east-1', 'dynamodb': {'ApproximateCreationDateTime': 1693511420.0, 'Keys': {'arn': {'S': 'arn:aws:health:us-east-1::event/EVENTS/AWS_EVENTS_INCREASED_API_LATENCIES/AWS_EVENTS_INCREASED_API_LATENCIES_fd55ae84-059a-57ca-9937-554b6ac2ffdf'}}, 'OldImage': {'latestDescription': {'S': 'We are investigating increased API latencies in the US-EAST-1 Region.\n\n[11:58 AM PDT] Between 10:30 AM and 11:25 AM PDT, we experienced increased API latencies in the US-EAST-1 Region. The issue is resolved and the service is operating normally. '}, 'added': {'S': '1693510847'}, 'lastUpdatedTime': {'S': '1693508404'}, 'affectedAccountIDs': {'L': [{'S': '493801680065'}, {'S': '638786611330'}]}, 'arn': {'S': 'arn:aws:health:us-east-1::event/EVENTS/AWS_EVENTS_INCREASED_API_LATENCIES/AWS_EVENTS_INCREASED_API_LATENCIES_fd55ae84-059a-57ca-9937-554b6ac2ffdf'}, 'ttl': {'N': '1693510907'}, 'statusCode': {'S': 'closed'}}, 'SequenceNumber': '282145900000000055288853903', 'SizeBytes': 671, 'StreamViewType': 'NEW_AND_OLD_IMAGES'}, 'userIdentity': {'principalId': 'dynamodb.amazonaws.com', 'type': 'Service'}, 'eventSourceARN': 'arn:aws:dynamodb:us-east-1:317098396095:table/aws-health-aware-DynamoDBTable-ZBTOH6ILIS1G/stream/2023-08-29T17:37:51.132'}]}
+    main(event, '')
