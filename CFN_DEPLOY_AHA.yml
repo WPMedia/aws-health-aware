@@ -22,7 +22,7 @@ Metadata:
           - MicrosoftTeamsWebhookURL
           - AmazonChimeWebhookURL
           - EventBusName
-          - JiraInstanceURL
+          - JiraInstanceSecretParam
       - Label:
           default: Email Setup - For Alerting via Email
         Parameters:
@@ -172,7 +172,7 @@ Parameters:
       leave the default (None).
     Type: String
     Default: None
-  JiraInstanceURL:
+  JiraInstanceSecretParam:
     Description: >-
       Enter the Jira Instance URL. Once the secret is created, you must manually enter the auth data into the secret.
       If you don't prefer to use Jira, leave the default (None).
@@ -646,7 +646,7 @@ Resources:
     Type: 'AWS::SecretsManager::Secret'
     Condition: UsingJira
     Properties:
-      Name: JiraInstanceURL
+      Name: JiraInstanceSecretParam
       Description: Jira Instance and Auth info
       ReplicaRegions:
         !If
