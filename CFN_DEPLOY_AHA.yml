@@ -54,7 +54,7 @@ Metadata:
         default: Microsoft Teams Webhook URL
       AmazonChimeWebhookURL:
         default: Amazon Chime Webhook URL
-      JiraInstanceURL:
+      JiraInstanceSecretParam:
         default: Jira Instance URL
       FromEmail:
         default: Email From
@@ -74,7 +74,7 @@ Conditions:
   UsingSlack: !Not [!Equals [!Ref SlackWebhookURL, None]]
   UsingTeams: !Not [!Equals [!Ref MicrosoftTeamsWebhookURL, None]]
   UsingChime: !Not [!Equals [!Ref AmazonChimeWebhookURL, None]]
-  UsingJira: !Not [!Equals [!Ref JiraInstanceURL, None]]
+  UsingJira: !Not [!Equals [!Ref JiraInstanceSecretParam, None]]
   UsingEventBridge: !Not [!Equals [!Ref EventBusName, None]]
   UsingSecrets: !Or [!Condition UsingSlack, !Condition UsingTeams, !Condition UsingChime, !Condition UsingEventBridge, !Condition UsingCrossAccountRole]
   UsingCrossAccountRole: !Not [!Equals [!Ref ManagementAccountRoleArn, None]]
@@ -653,7 +653,7 @@ Resources:
         - UsingMultiRegion
         - [{ Region: !Sub '${SecondaryRegion}' }]
         - !Ref "AWS::NoValue"
-      SecretString: !Join ["", ['{ "JiraInstanceURL": ', !Ref JiraInstanceURL, '" }"']]
+      SecretString: !Ref JiraInstanceSecretParam
       Tags:
         - Key: HealthCheckJira
           Value: ChannelID
