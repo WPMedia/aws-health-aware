@@ -646,7 +646,7 @@ Resources:
     Type: 'AWS::SecretsManager::Secret'
     Condition: UsingJira
     Properties:
-      Name: JiraInstanceSecretParam
+      Name: JiraInstanceSecret
       Description: Jira Instance and Auth info
       ReplicaRegions:
         !If
