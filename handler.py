@@ -570,7 +570,7 @@ def get_secrets():
     secret_teams_name = "MicrosoftChannelID"
     secret_slack_name = "SlackChannelID"
     secret_chime_name = "ChimeChannelID"
-    secret_jira_name = "JiraInstanceURL"
+    secret_jira_name = "JiraInstanceSecret"
     region_name = os.environ['AWS_REGION']
     get_secret_value_response_assumerole = ""
     get_secret_value_response_eventbus = ""
