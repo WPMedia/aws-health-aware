@@ -177,10 +177,12 @@ class Jira(object):
     statuses = []
     for issue in issues:
       create_issue_resp = self.create_issue(issue)
-      print("body", create_issue_resp.status, create_issue_resp.data)
+      if create_issue_resp:
+        print("body", create_issue_resp.status, create_issue_resp.data)
       if issue.status == "resolve":
         resolve_issue_resp = self.resolve_issue(issue)
-        print("body", resolve_issue_resp.status, resolve_issue_resp.data)
+        if resolve_issue_resp:
+          print("body", resolve_issue_resp.status, resolve_issue_resp.data)
 
         statuses.append(resolve_issue_resp)
       else:
