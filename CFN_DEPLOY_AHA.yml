@@ -566,7 +566,7 @@ Resources:
     Type: 'AWS::Events::Rule'
     Properties:
       Description: Lambda trigger Event
-      ScheduleExpression: rate(1 minute)
+      ScheduleExpression: rate(10 minutes)
       State: ENABLED
       Targets:
         - Arn: !GetAtt LambdaFunction.Arn

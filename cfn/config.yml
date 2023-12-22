@@ -7,7 +7,7 @@ template: CFN_DEPLOY_AHA.yml
 params:
   AWSHealthEventType: "issue | accountNotification | scheduledChange"
   AWSOrganizationsEnabled:	Yes
-  EventSearchBack: 12
+  EventSearchBack: 72
   JiraInstanceSecretParam: BLANK_TO_CREATE_MANUALLY
   ManagementAccountRoleArn: arn:aws:iam::537691856263:role/custodian-health-read
   Regions: us-east-1,us-east-2,ap-southeast-2,eu-central-1,ap-northeast-1
