@@ -40,12 +40,17 @@ config = Config(
 
 # TODO decide if account_name should be blank on error
 # Get Account Name
+account_name_cache = dict()
 def get_account_name(account_id):
+    if account_id in account_name_cache:
+        return account_name_cache[account_id]
+
     org_client = get_sts_token('organizations')
     try:
         account_name = org_client.describe_account(AccountId=account_id)['Account']['Name']
     except Exception:
         account_name = account_id
+    account_name_cache[account_name] = account_id
     return account_name
 
 def send_alert(event_details, affected_accounts, affected_entities, event_type):
